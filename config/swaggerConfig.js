@@ -1,25 +1,29 @@
-// src/config/swaggerConfig.js
+// config/swaggerConfig.js
 import swaggerJsdoc from "swagger-jsdoc";
 import swaggerUi from "swagger-ui-express";
 
-// Define the Swagger configuration
-const options = {
-  definition: {
-    openapi: "1.0.0", 
+const swaggerOptions = {
+  swaggerDefinition: {
+    openapi: "3.0.0",
     info: {
       title: "FAQ API",
       version: "1.0.0",
-      description: "API for managing FAQs with multilingual support",
+      description: "API to manage FAQs with multi-language support",
     },
     servers: [
       {
-        url: "http://localhost:5000", 
+        url: `http://localhost:${process.env.PORT || 3000}`,
       },
     ],
   },
-  apis: ["./src/routes/*.js"], // Point to your route files for documentation
+  apis: ["./Routes/*.js"],
 };
 
-const swaggerSpec = swaggerJsdoc(options);
+const swaggerDocs = swaggerJsdoc(swaggerOptions);
 
-export { swaggerSpec, swaggerUi };
+const swaggerSetup = (app) => {
+  app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
+};
+
+export default swaggerSetup;
+

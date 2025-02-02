@@ -1,7 +1,6 @@
 import FAQ from "../models/Faq.js"; 
 import redisClient from "../config/redisClient.js"; 
 import translate from "../services/translateService.js"; 
-
 export const getFAQs = async (req, res) => {
   try {
     const lang = req.query.lang || "en"; // Default to English if no language is provided
@@ -21,14 +20,16 @@ export const getFAQs = async (req, res) => {
     if (lang !== "en") {
       // Translate each FAQ individually
       const translatePromises = faqs.map(async (faq) => {
-        if (!faq.translations.has(lang)) {
+        if (!faq.translations[lang]) {
           // Translate question and answer individually
           const translatedQuestion = await translate(faq.question, lang);
           const translatedAnswer = await translate(faq.answer, lang);
 
-          // Combine question and answer with $$ separator and store in translations map
-          const combinedTranslation = `${translatedQuestion}$$${translatedAnswer}`;
-          faq.translations.set(lang, combinedTranslation);
+          // Add translated question and answer to translations object
+          faq.translations[lang] = {
+            question: translatedQuestion,
+            answer: translatedAnswer
+          };
 
           await faq.save(); // Update MongoDB with new translations
         }
@@ -40,17 +41,16 @@ export const getFAQs = async (req, res) => {
 
     // Format response with the translated question and answer
     const response = faqs.map(faq => {
-      const translation = faq.translations.get(lang);
+      const translation = faq.translations[lang];
       if (translation) {
-        // Split the combined translation into question and answer
-        const [translatedQuestion, translatedAnswer] = translation.split('$$');
+        // If translation exists, return the translated question and answer
         return {
           _id: faq._id,
-          question: translatedQuestion,
-          answer: translatedAnswer
+          question: translation.question,
+          answer: translation.answer
         };
       } else {
-        // Fallback to original question and answer
+        // Fallback to original question and answer if no translation is available
         return {
           _id: faq._id,
           question: faq.question,
@@ -59,7 +59,7 @@ export const getFAQs = async (req, res) => {
       }
     });
 
-    // Cache the result for future use (e.g., 1 hour expiry)
+    // Cache the entire list of FAQs for the given language
     await redisClient.setEx(`faqs_${lang}`, 3600, JSON.stringify(response)); // Expire in 1 hour
 
     console.log('Data fetched from database');
@@ -75,14 +75,23 @@ export const createFAQ = async (req, res) => {
   try {
     const { question, answer } = req.body;
 
+    // Check if an FAQ with the same question already exists
+    const existingFAQ = await FAQ.findOne({ question }).select('question answer');
+
+    if (existingFAQ) {
+      return res.status(400).json({ message: "FAQ already exists" });
+    }
+
+    // Create a new FAQ if it doesn't exist
     const newFAQ = new FAQ({
       question,
       answer,
-      translations: {}  // Empty initially
+      translations: {} 
     });
 
     await newFAQ.save();
-    res.status(201).json(newFAQ);
+
+    res.status(201).json({ message: "FAQ added successfully" });
   } catch (err) {
     console.error("Error creating FAQ:", err);
     res.status(500).json({ message: "Error creating FAQ" });

@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import connectMongoDB from './config/mongo.js';
 import faqRoutes from './routes/faqRoutes.js'; 
 import cors from "cors";
-
+import swaggerSetup from "./config/swaggerConfig.js";
 dotenv.config();
 
 const app = express();
@@ -17,6 +17,7 @@ app.use(express.json()); // 👈 This must be before routes
 // Connect to MongoDB
 connectMongoDB();
 
+swaggerSetup(app);
 // Register the FAQ routes
 app.use('/api', faqRoutes); // 👈 Routes are now properly set
 
