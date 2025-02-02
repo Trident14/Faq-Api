@@ -8,56 +8,83 @@ export const getFAQs = async (req, res) => {
     // Check Redis cache first
     const cachedData = await redisClient.get(`faqs_${lang}`);
     if (cachedData) {
-      // If cached data exists, parse and send it
-      console.log('Data fetched from cache');
-      return res.json(JSON.parse(cachedData));
-    }
+      // Parse cached data
+      const cachedFAQs = JSON.parse(cachedData);
 
-    // If no cached data, fetch from the database
-    let faqs = await FAQ.find().select('question answer translations'); // Limit fields returned
+      // Fetch FAQs from MongoDB
+      let faqs = await FAQ.find().select('question answer translations');
 
-    // Translate FAQs if necessary and cache the results
-    if (lang !== "en") {
-      // Translate each FAQ individually
-      const translatePromises = faqs.map(async (faq) => {
-        if (!faq.translations[lang]) {
-          // Translate question and answer individually
-          const translatedQuestion = await translate(faq.question, lang);
-          const translatedAnswer = await translate(faq.answer, lang);
+      // Check if the number of cached FAQs matches the MongoDB FAQ size
+      if (cachedFAQs.length === faqs.length) {
+        // Check if all FAQs have the requested language translation
+        const allTranslated = faqs.every(faq => faq.translations[lang]);
+        
+        if (allTranslated) {
+          // If all FAQs are fully translated, return cached data
+          console.log('All translations available, data fetched from cache');
+          return res.json(cachedFAQs);
+        } else {
+          // If some translations are missing, fetch the missing translations, update the cache, and return the updated response
+          const translatePromises = faqs.map(async (faq) => {
+            if (!faq.translations[lang]) {
+              const translatedQuestion = await translate(faq.question, lang);
+              const translatedAnswer = await translate(faq.answer, lang);
 
-          // Add translated question and answer to translations object
-          faq.translations[lang] = {
-            question: translatedQuestion,
-            answer: translatedAnswer
-          };
+              faq.translations[lang] = {
+                question: translatedQuestion,
+                answer: translatedAnswer
+              };
 
-          await faq.save(); // Update MongoDB with new translations
+              await faq.save(); // Update MongoDB with new translations
+            }
+          });
+
+          // Wait for all translation promises to complete
+          await Promise.all(translatePromises);
+
+          // Format the updated response
+          const updatedResponse = faqs.map(faq => ({
+            _id: faq._id,
+            question: faq.translations[lang].question,
+            answer: faq.translations[lang].answer
+          }));
+
+          // Cache the updated FAQs
+          await redisClient.setEx(`faqs_${lang}`, 3600, JSON.stringify(updatedResponse));
+
+          console.log('Some translations were missing, data updated and fetched from database');
+          return res.json(updatedResponse); // Send the updated response
         }
-      });
-
-      // Wait for all translation promises to complete
-      await Promise.all(translatePromises);
+      }
     }
 
-    // Format response with the translated question and answer
-    const response = faqs.map(faq => {
-      const translation = faq.translations[lang];
-      if (translation) {
-        // If translation exists, return the translated question and answer
-        return {
-          _id: faq._id,
-          question: translation.question,
-          answer: translation.answer
+    // If no cache or mismatch in size, fetch from the database
+    let faqs = await FAQ.find().select('question answer translations');
+    
+    // Translate FAQs if necessary
+    const translatePromises = faqs.map(async (faq) => {
+      if (!faq.translations[lang]) {
+        const translatedQuestion = await translate(faq.question, lang);
+        const translatedAnswer = await translate(faq.answer, lang);
+
+        faq.translations[lang] = {
+          question: translatedQuestion,
+          answer: translatedAnswer
         };
-      } else {
-        // Fallback to original question and answer if no translation is available
-        return {
-          _id: faq._id,
-          question: faq.question,
-          answer: faq.answer
-        };
+
+        await faq.save(); // Update MongoDB with new translations
       }
     });
+
+    // Wait for all translation promises to complete
+    await Promise.all(translatePromises);
+
+    // Format response with the translated question and answer
+    const response = faqs.map(faq => ({
+      _id: faq._id,
+      question: faq.translations[lang].question,
+      answer: faq.translations[lang].answer
+    }));
 
     // Cache the entire list of FAQs for the given language
     await redisClient.setEx(`faqs_${lang}`, 3600, JSON.stringify(response)); // Expire in 1 hour
