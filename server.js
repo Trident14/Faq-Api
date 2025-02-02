@@ -1,13 +1,26 @@
 import express from "express";
 import dotenv from "dotenv";
-import mongoose from "mongoose";
-import redis from "redis";
-import axios from "axios";
+import connectMongoDB from './config/mongo.js';
+import faqRoutes from './routes/faqRoutes.js'; 
+import cors from "cors";
 
 dotenv.config();
 
 const app = express();
 
+// Use CORS
+app.use(cors());
+
+// Middleware to parse JSON
+app.use(express.json()); // 👈 This must be before routes
+
+// Connect to MongoDB
+connectMongoDB();
+
+// Register the FAQ routes
+app.use('/api', faqRoutes); // 👈 Routes are now properly set
+
+// Default route
 app.get("/", (req, res) => {
   res.send("FAQ API is running...");
 });
